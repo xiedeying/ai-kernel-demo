@@ -55,6 +55,7 @@ ai-kernel-demo/
 ---
 
 ## 3. Performance
+
 ```text
 ==== MatMul Benchmark (CPU vs CUDA naive/tiled) ====
 Matrix size: M=1024, K=1024, N=1024
