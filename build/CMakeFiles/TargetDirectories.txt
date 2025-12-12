@@ -1,4 +1,0 @@
-/home/dexie/projects/ai-kernel-demo/build/CMakeFiles/matmul.dir
-/home/dexie/projects/ai-kernel-demo/build/CMakeFiles/matmul_bench.dir
-/home/dexie/projects/ai-kernel-demo/build/CMakeFiles/edit_cache.dir
-/home/dexie/projects/ai-kernel-demo/build/CMakeFiles/rebuild_cache.dir

@@ -1,2 +1,0 @@
-/usr/bin/ar qc libmatmul.a CMakeFiles/matmul.dir/src/matmul_cpu.cpp.o CMakeFiles/matmul.dir/src/matmul_cuda.cu.o CMakeFiles/matmul.dir/src/fused_ops.cu.o
-/usr/bin/ranlib libmatmul.a

@@ -1,5 +1,6 @@
 #include "matmul.h"
 #include "fused_ops.h"  // 融合算子 & softmax 的头文件
+#include "conv2d.h"
 
 #include <cuda_runtime.h>
 
@@ -28,6 +29,23 @@ float max_abs_diff(const std::vector<float>& a,
 // 矩阵乘法 C = A * B 中，总乘加次数是 2 * M * N * K（乘 + 加）
 double compute_gflops(int M, int N, int K, double time_ms) {
     double ops = 2.0 * M * N * K;
+    double time_s = time_ms / 1000.0;
+    return ops / time_s / 1e9;
+}
+
+// 计算 Conv2D 的 FLOPs：
+// ops ≈ 2 * N * C_out * H_out * W_out * C_in * K_h * K_w
+double compute_conv2d_gflops(
+    int N, int C_in, int H_in, int W_in,
+    int C_out, int K_h, int K_w,
+    int stride_h, int stride_w,
+    int pad_h, int pad_w,
+    double time_ms
+) {
+    int H_out = (H_in + 2 * pad_h - K_h) / stride_h + 1;
+    int W_out = (W_in + 2 * pad_w - K_w) / stride_w + 1;
+    double ops = 2.0 * static_cast<double>(N) * C_out
+                 * H_out * W_out * C_in * K_h * K_w;
     double time_s = time_ms / 1000.0;
     return ops / time_s / 1e9;
 }
@@ -292,9 +310,124 @@ void run_softmax_benchmark() {
     }
 }
 
+// ==========================
+// 4. Conv2D benchmark（NCHW）
+// ==========================
+void run_conv2d_benchmark() {
+    std::cout << "\n==== Conv2D NCHW Benchmark (CPU vs CUDA naive) ====\n";
+
+    // 这里选一个比较典型的卷积配置：
+    //   N = 32, C_in = 3, H=W=64, C_out = 16, K = 3x3, stride=1, pad=1
+    int N  = 32;
+    int C_in  = 3;
+    int H_in  = 64;
+    int W_in  = 64;
+    int C_out = 16;
+    int K_h   = 3;
+    int K_w   = 3;
+    int stride_h = 1;
+    int stride_w = 1;
+    int pad_h    = 1;
+    int pad_w    = 1;
+
+    int H_out = (H_in + 2 * pad_h - K_h) / stride_h + 1;
+    int W_out = (W_in + 2 * pad_w - K_w) / stride_w + 1;
+
+    std::cout << "Input:  N=" << N
+              << ", C_in=" << C_in
+              << ", H_in=" << H_in
+              << ", W_in=" << W_in << "\n";
+    std::cout << "Filter: C_out=" << C_out
+              << ", K_h=" << K_h
+              << ", K_w=" << K_w << "\n";
+    std::cout << "Output: H_out=" << H_out
+              << ", W_out=" << W_out << "\n";
+
+    size_t sizeX = static_cast<size_t>(N) * C_in * H_in * W_in;
+    size_t sizeW = static_cast<size_t>(C_out) * C_in * K_h * K_w;
+    size_t sizeY = static_cast<size_t>(N) * C_out * H_out * W_out;
+    size_t sizeBias = static_cast<size_t>(C_out);
+
+    std::vector<float> X(sizeX);
+    std::vector<float> W(sizeW);
+    std::vector<float> bias(sizeBias);
+    std::vector<float> Y_cpu(sizeY);
+    std::vector<float> Y_gpu(sizeY);
+
+    std::mt19937 rng(45678);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    for (auto& v : X)    v = dist(rng);
+    for (auto& v : W)    v = dist(rng);
+    for (auto& v : bias) v = dist(rng);
+
+    // CPU baseline
+    auto t_conv_cpu_start = std::chrono::high_resolution_clock::now();
+    conv2d_nchw_cpu(
+        X.data(), W.data(), bias.data(), Y_cpu.data(),
+        N, C_in, H_in, W_in,
+        C_out, K_h, K_w,
+        stride_h, stride_w,
+        pad_h, pad_w
+    );
+    auto t_conv_cpu_end = std::chrono::high_resolution_clock::now();
+    double conv_cpu_ms = std::chrono::duration<double, std::milli>(
+                             t_conv_cpu_end - t_conv_cpu_start
+                         ).count();
+
+    std::cout << "[CPU conv2d] time: " << conv_cpu_ms << " ms\n";
+    std::cout << "[CPU conv2d] approx GFLOPS: "
+              << compute_conv2d_gflops(
+                     N, C_in, H_in, W_in,
+                     C_out, K_h, K_w,
+                     stride_h, stride_w,
+                     pad_h, pad_w,
+                     conv_cpu_ms
+                 ) << "\n\n";
+
+    // CUDA naive conv2d
+    cudaEvent_t conv_start_gpu, conv_stop_gpu;
+    cudaEventCreate(&conv_start_gpu);
+    cudaEventCreate(&conv_stop_gpu);
+
+    cudaEventRecord(conv_start_gpu);
+    conv2d_nchw_cuda_naive(
+        X.data(), W.data(), bias.data(), Y_gpu.data(),
+        N, C_in, H_in, W_in,
+        C_out, K_h, K_w,
+        stride_h, stride_w,
+        pad_h, pad_w
+    );
+    cudaEventRecord(conv_stop_gpu);
+    cudaEventSynchronize(conv_stop_gpu);
+
+    float conv_gpu_ms = 0.0f;
+    cudaEventElapsedTime(&conv_gpu_ms, conv_start_gpu, conv_stop_gpu);
+
+    cudaEventDestroy(conv_start_gpu);
+    cudaEventDestroy(conv_stop_gpu);
+
+    std::cout << "[CUDA conv2d naive] total time (H2D+kernel+D2H): "
+              << conv_gpu_ms << " ms\n";
+    std::cout << "[CUDA conv2d naive] approx GFLOPS: "
+              << compute_conv2d_gflops(
+                     N, C_in, H_in, W_in,
+                     C_out, K_h, K_w,
+                     stride_h, stride_w,
+                     pad_h, pad_w,
+                     conv_gpu_ms
+                 ) << "\n";
+
+    float conv_diff = max_abs_diff(Y_cpu, Y_gpu);
+    std::cout << "[CUDA conv2d naive] max abs diff vs CPU: "
+              << conv_diff << "\n";
+    std::cout << "Speedup vs CPU (conv2d): "
+              << conv_cpu_ms / conv_gpu_ms << "x\n";
+}
+
 int main() {
     run_matmul_benchmark();
     run_fused_matmul_benchmark();
     run_softmax_benchmark();
+    run_conv2d_benchmark(); 
     return 0;
 }
