@@ -51,7 +51,7 @@ ai-kernel-demo/
     conv2d.cu      # Conv2D CPU + CUDA naive 实现
     main.cpp       # 统一 benchmark，运行所有算子
 
-
+```
 ---
 
 ## 3. Performance
@@ -107,3 +107,4 @@ Output: H_out=64, W_out=64
 [CUDA conv2d naive] approx GFLOPS: 27.1946
 [CUDA conv2d naive] max abs diff vs CPU: 1.90735e-06
 Speedup vs CPU (conv2d): 76.5816x
+```
