@@ -52,7 +52,10 @@ ai-kernel-demo/
     main.cpp       # 统一 benchmark，运行所有算子
 
 
-## Performance
+---
+
+## 3. Performance
+```text
 ==== MatMul Benchmark (CPU vs CUDA naive/tiled) ====
 Matrix size: M=1024, K=1024, N=1024
 [CPU] time: 4045.81 ms
